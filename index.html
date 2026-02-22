@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ImageCompare - Multi-Image Overlay</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111;
+      color: #eee;
+      padding: 1rem;
+    }
+    h1 {
+      font-size: 1.2rem;
+      margin-bottom: 0.75rem;
+      color: #fff;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 1rem;
+      align-items: start;
+    }
+    @media (max-width: 700px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    canvas {
+      border: 1px solid #555;
+      background: #000;
+      max-width: 100%;
+      display: block;
+    }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding-right: 0.25rem;
+    }
+    .panel {
+      background: #1a1a1a;
+      border-radius: 6px;
+      padding: 0.75rem;
+      border: 1px solid #333;
+    }
+    .panel h2 {
+      font-size: 0.9rem;
+      margin-bottom: 0.5rem;
+      color: #ccc;
+    }
+    input[type="file"] {
+      width: 100%;
+      font-size: 0.8rem;
+      color: #ccc;
+    }
+    .hint {
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      color: #6b7280;
+    }
+    .image-row {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.4rem;
+      padding: 0.3rem;
+      background: #222;
+      border-radius: 4px;
+    }
+    .image-row .meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .image-row label {
+      font-size: 0.7rem;
+      color: #9ca3af;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 120px;
+    }
+    .image-row .opacity-val {
+      font-size: 0.7rem;
+      color: #60a5fa;
+    }
+    .image-row input[type="range"] {
+      width: 100%;
+      accent-color: #2563eb;
+    }
+    .thumb {
+      width: 34px;
+      height: 34px;
+      object-fit: cover;
+      border-radius: 3px;
+      border: 1px solid #444;
+    }
+    button.remove {
+      background: #7f1d1d;
+      border: 1px solid #991b1b;
+      border-radius: 4px;
+      color: #fca5a5;
+      width: 24px;
+      height: 24px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    button.remove:hover { background: #b91c1c; }
+    #empty {
+      font-size: 0.8rem;
+      color: #6b7280;
+      padding: 0.25rem 0;
+    }
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-top: 0.5rem;
+    }
+    .toolbar button {
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background: #222;
+      color: #eee;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .toolbar button:hover { background: #2563eb; border-color: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <h1>ImageCompare &mdash; Multi-Image Overlay (up to 10)</h1>
+  <div class="layout">
+    <div>
+      <canvas id="canvas" width="800" height="600"></canvas>
+      <div class="toolbar">
+        <button id="resetBtn">Reset all opacities</button>
+        <button id="saveBtn">Save composite as PNG</button>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="panel">
+        <h2>Load images</h2>
+        <input id="fileInput" type="file" accept="image/*" multiple />
+        <div class="hint">Select up to 10 images. Use sliders to blend layers.</div>
+      </div>
+      <div class="panel">
+        <h2>Layers &amp; opacity</h2>
+        <div id="layersContainer">
+          <div id="empty">No images loaded yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const MAX = 10;
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const fileInput = document.getElementById('fileInput');
+    const layersContainer = document.getElementById('layersContainer');
+    const emptyMsg = document.getElementById('empty');
+    const resetBtn = document.getElementById('resetBtn');
+    const saveBtn = document.getElementById('saveBtn');
+
+    let images = [];
+
+    function uid() {
+      return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!images.length) return;
+      const base = images[0].img;
+      const scale = Math.min(canvas.width / base.width, canvas.height / base.height);
+      const w = base.width * scale;
+      const h = base.height * scale;
+      const x = (canvas.width - w) / 2;
+      const y = (canvas.height - h) / 2;
+      images.forEach(layer => {
+        if (layer.opacity <= 0) return;
+        ctx.globalAlpha = layer.opacity;
+        ctx.drawImage(layer.img, x, y, w, h);
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    function rebuildUI() {
+      layersContainer.innerHTML = '';
+      if (!images.length) {
+        layersContainer.appendChild(emptyMsg);
+        return;
+      }
+      images.forEach(layer => {
+        const row = document.createElement('div');
+        row.className = 'image-row';
+
+        const thumb = document.createElement('img');
+        thumb.className = 'thumb';
+        thumb.src = layer.img.src;
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+
+        const lbl = document.createElement('label');
+        lbl.textContent = layer.name;
+        lbl.title = layer.name;
+
+        const opVal = document.createElement('span');
+        opVal.className = 'opacity-val';
+        opVal.textContent = Math.round(layer.opacity * 100) + '%';
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0'; slider.max = '1'; slider.step = '0.01';
+        slider.value = layer.opacity;
+        slider.addEventListener('input', () => {
+          layer.opacity = parseFloat(slider.value);
+          opVal.textContent = Math.round(layer.opacity * 100) + '%';
+          draw();
+        });
+
+        meta.appendChild(lbl);
+        meta.appendChild(opVal);
+        meta.appendChild(slider);
+
+        const rm = document.createElement('button');
+        rm.className = 'remove';
+        rm.textContent = 'x';
+        rm.title = 'Remove layer';
+        rm.addEventListener('click', () => {
+          images = images.filter(i => i.id !== layer.id);
+          rebuildUI();
+          draw();
+        });
+
+        row.appendChild(thumb);
+        row.appendChild(meta);
+        row.appendChild(rm);
+        layersContainer.appendChild(row);
+      });
+    }
+
+    fileInput.addEventListener('change', e => {
+      const files = Array.from(e.target.files || []);
+      const slots = MAX - images.length;
+      if (!files.length || slots <= 0) return;
+      files.slice(0, slots).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const img = new Image();
+          img.onload = () => {
+            if (images.length === 0) {
+              canvas.width = Math.min(img.width, 1200);
+              canvas.height = Math.round(img.height * (canvas.width / img.width));
+              if (canvas.height > 800) {
+                canvas.height = 800;
+                canvas.width = Math.round(img.width * (canvas.height / img.height));
+              }
+            }
+            images.push({ id: uid(), name: file.name, img, opacity: 0.7 });
+            rebuildUI();
+            draw();
+          };
+          img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+      if (files.length > slots) alert('Max 10 images. Only the first ' + slots + ' were added.');
+      fileInput.value = '';
+    });
+
+    resetBtn.addEventListener('click', () => {
+      images.forEach(l => l.opacity = 0.7);
+      rebuildUI();
+      draw();
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.download = 'composite.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
+
+    rebuildUI();
+  </script>
+</body>
+</html>
